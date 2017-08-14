@@ -1,6 +1,6 @@
 {
-  "name": "uasync",
-  "version": "0.0.1",
+  "name": "UAsync",
+  "version": "0.0.2",
   "description": "UAsync is a library that allows you to write robust code with Unity coroutine using caolan's async style",
   "main": "index.js",
   "files": [

@@ -9,7 +9,35 @@ public class UAsyncTests : MonoBehaviour
     void Start ()
     {
 //        TestParallel ();
-        TestSeries ();
+//        TestSeries ();
+        TestEachSeries ();
+    }
+
+    void TestEachSeries ()
+    {
+        var a = new int [] { 1, 2, 3 };
+        var series = 
+            UAsync.Async.EachSeries<int> (
+                a,
+//                EachSeriesFunc<int>.FromAction (PrintInt),
+                EachSeriesFunc<int>.FromEnumerator (PrintIntCo),
+                EachFinalFunc.From ((object err) => {
+                    Debug.Log ("Finish " + err);
+                })
+            );
+    }
+
+    IEnumerator PrintIntCo (int i, CallbackDelegate cb)
+    {
+        yield return new WaitForSeconds (1);
+        Debug.Log (i);
+        cb ();
+    }
+
+    void PrintInt (int i, CallbackDelegate cb)
+    {
+        Debug.Log (i);
+        cb ();
     }
 
     void TestSeries ()

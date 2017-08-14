@@ -2,6 +2,8 @@ using System.Collections;
 using UAsync.Svelto.Tasks;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
 
 namespace UAsync
 {
@@ -102,6 +104,76 @@ namespace UAsync
         }
     }
 
+    class EachSeriesFunc<T>
+    {
+        internal Action<T, CallbackDelegate> action;
+        internal Func<T, CallbackDelegate, IEnumerator> enumerator;
+
+        private EachSeriesFunc ()
+        {
+        }
+
+        public static EachSeriesFunc<T> FromAction (Action<T, CallbackDelegate> action)
+        {
+            if (action == null) {
+                throw new ArgumentException ();
+            }
+
+            var f = Create ();
+            f.action = action;
+            f.enumerator = null;
+            return f;
+        }
+
+        public static EachSeriesFunc<T> FromEnumerator (Func<T, CallbackDelegate, IEnumerator> enumerator)
+        {
+            if (enumerator == null) {
+                throw new ArgumentException ();
+            }
+
+            var f = Create ();
+            f.action = null;
+            f.enumerator = enumerator;
+            return f;
+        }
+
+        static EachSeriesFunc<T> Create ()
+        {
+            var f = LeanClassPool <EachSeriesFunc<T>>.Spawn ();
+
+            if (f == null) {
+                f = new EachSeriesFunc<T> ();
+            }
+
+            return f;
+        }
+    }
+
+    class EachFinalFunc
+    {
+        internal Action<object> action;
+
+        internal EachFinalFunc ()
+        {
+        }
+
+        public static EachFinalFunc From (Action<object> action)
+        {
+            if (action == null) {
+                throw new ArgumentException ();
+            }
+
+            var finalFunc = LeanClassPool <EachFinalFunc>.Spawn ();
+
+            if (finalFunc == null) {
+                finalFunc = new EachFinalFunc ();
+            }
+
+            finalFunc.action = action;
+            return finalFunc;
+        }
+    }
+
     class UAsyncFinalFunc
     {
         internal Action<object, Dictionary<string, object>> action;
@@ -116,14 +188,14 @@ namespace UAsync
                 throw new ArgumentException ();
             }
 
-            var uAsyncFinalFunc = LeanClassPool <UAsyncFinalFunc>.Spawn ();
+            var finalFunc = LeanClassPool <UAsyncFinalFunc>.Spawn ();
 
-            if (uAsyncFinalFunc == null) {
-                uAsyncFinalFunc = new UAsyncFinalFunc ();
+            if (finalFunc == null) {
+                finalFunc = new UAsyncFinalFunc ();
             }
 
-            uAsyncFinalFunc.action = action;
-            return uAsyncFinalFunc;
+            finalFunc.action = action;
+            return finalFunc;
         }
     }
 
@@ -153,6 +225,17 @@ namespace UAsync
             return new AsyncSeries (args);
         }
 
+        /// <summary>
+        /// Run a series of functions in parallel
+        /// The functions are wrapped in SeriesFunc objects since C# does not
+        /// support conversion from method group to object
+        /// The last parameter must be UAsyncFinalFunc
+        /// </summary>
+        /// <param name="args">Arguments.</param>
+        public static IAsyncTask EachSeries <T> (params object[] args)
+        {
+            return new AsyncEachSeries <T> (args);
+        }
     }
 
     interface IAsyncTask
@@ -374,11 +457,15 @@ namespace UAsync
             var name = func.name;
 
             if (func.action != null) {
-                taskRoutine = TaskRunner.Instance.Run (
-                    new SingleTask (() => func.action ((err, res) => Callback (name, err, res), result)),
-                    TaskRunnerCallback);
+                taskRoutine = 
+                    TaskRunner.Instance.Run (
+                    new SingleTask (
+                        () => func.action ((err, res) => Callback (name, err, res), result)),
+                    TaskRunnerCallback
+                );
             } else {
-                taskRoutine = TaskRunner.Instance.Run (
+                taskRoutine = 
+                    TaskRunner.Instance.Run (
                     func.enumerator ((err, res) => Callback (name, err, res), result),
                     TaskRunnerCallback);
             }
@@ -457,6 +544,138 @@ namespace UAsync
             }
 
             funcs.Clear ();
+        }
+    }
+
+    class AsyncEachSeries<T> : IAsyncTask
+    {
+        bool isDone;
+        int completeNum;
+        int total;
+        List<T> items;
+        readonly EachFinalFunc finalFunc;
+        TaskRoutine taskRoutine;
+        EachSeriesFunc<T> func;
+
+        internal AsyncEachSeries (object[] args)
+        {
+            if (args.Length != 3) {
+                throw new ArgumentException ();
+            }
+
+            if (!(args [0] is IEnumerable <T>)) {
+                throw new ArgumentException ();
+            }
+
+            if (args [1] == null || !(args [1] is EachSeriesFunc <T>)) {
+                throw new ArgumentException ();
+            }
+
+            if (args [args.Length - 1] == null || !(args [args.Length - 1] is EachFinalFunc)) {
+                throw new ArgumentException ();
+            }
+
+            isDone = false;
+            completeNum = 0;
+            var temp = (IEnumerable<T>)args [0];
+            items = temp.ToList ();
+            total = items.Count;
+            finalFunc = args [args.Length - 1] as EachFinalFunc;
+
+            if (total == 0) {
+                finalFunc.action (null);
+                return;
+            }
+
+            func = args [1] as EachSeriesFunc <T>;
+            RunOneFunc ();
+        }
+
+        void RunOneFunc ()
+        {
+            if (func.action != null) {
+                taskRoutine = 
+                    TaskRunner.Instance.Run (
+                    new SingleTask (
+                        () => func.action (items [completeNum], (err, res) => Callback (err))
+                    ),
+                    TaskRunnerCallback
+                );
+            } else {
+                taskRoutine = TaskRunner.Instance.Run (
+                    func.enumerator (
+                        items [completeNum],
+                        (err, res) => Callback (err)),
+                    TaskRunnerCallback
+                );
+            }
+        }
+
+        void Callback (object err)
+        {
+            if (isDone) {
+                return;
+            }
+
+            if (err != null) {
+                isDone = true;
+                taskRoutine.Cancel ();
+                Action<object> action = finalFunc.action;
+                Cleanup ();
+                action (err);
+                return;
+            }
+
+            completeNum++;
+
+            if (completeNum == total) {
+                isDone = true;
+                Action<object> action = finalFunc.action;
+                Cleanup ();
+                action (err);
+            } else {
+                RunOneFunc ();
+            }
+        }
+
+        /// <summary>
+        /// When TaskRunner finishes, it will callback, we don't care about the result in this case
+        /// </summary>
+        /// <param name="err">Error.</param>
+        /// <param name="res">Res.</param>
+        void TaskRunnerCallback (object err = null, object res = null)
+        {
+            if (isDone) {
+                return;
+            }
+
+            if (err != null) {
+                isDone = true;
+                Action<object> action = finalFunc.action;
+                Cleanup ();
+                action (err);
+            }
+        }
+
+        public void Cancel ()
+        {
+            if (isDone) {
+                return;
+            }
+
+            isDone = true;
+            taskRoutine.Cancel ();
+
+            Cleanup ();
+        }
+
+        void Cleanup ()
+        {
+            finalFunc.action = null;
+            LeanClassPool <EachFinalFunc>.Despawn (finalFunc);
+            taskRoutine = null;
+
+            LeanClassPool <EachSeriesFunc<T>>.Despawn (func);
         }
     }
 

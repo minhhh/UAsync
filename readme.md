@@ -78,6 +78,10 @@ Finally, you can cancel a running sequence once it's started. This is not obviou
 
 ## Changelog
 
+**0.0.2**
+
+* Add `Each` and `EachSeries`
+
 **0.0.1**
 
 * Initial commit
