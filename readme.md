@@ -37,9 +37,9 @@ Let's look at an example:
 ```
 var series =
     UAsync.Async.Series (
-        SeriesFunc.FromAction ("one", SeriesFunc1),
-        SeriesFunc.FromEnumerator ("two", SeriesFunc2),
-        SeriesFunc.FromAction ("three", SeriesFunc3),
+        ChildFunc.FromAction ("one", SeriesFunc1),
+        ChildFunc.FromEnumerator ("two", SeriesFunc2),
+        ChildFunc.FromAction ("three", SeriesFunc3),
         UAsyncFinalFunc.From ((object err, Dictionary<string, object> res) => {
             Debug.Log ("Finish " + err);
             if (err == null) {
@@ -65,22 +65,29 @@ void SeriesFunc3 (CallbackDelegate cb, Dictionary<string, object> res)
 }
 ```
 
-Here, `SeriesFunc.FromAction` and `SeriesFunc.FromEnumerator` are just convenient functions to wrap synchronous functions and coroutines. Each of the functions `SeriesFunc1`, `SeriesFunc2` and `SeriesFunc3` will receive a callback parameter and a `res` parameter. To complete the execution of each function, you must call `cb` with 2 parameters: `err` representing the error, and `result` representing the returned value. In the code above, there is no error. If any of the code in those function throws exception, cb will also be called automatically with the exception as the first parameter.
+Here, `ChildFunc.FromAction` and `ChildFunc.FromEnumerator` are just convenient functions to wrap synchronous functions and coroutines. Each of the functions `SeriesFunc1`, `SeriesFunc2` and `SeriesFunc3` will receive a callback parameter and a `res` parameter. To complete the execution of each function, you must call `cb` with 2 parameters: `err` representing the error, and `result` representing the returned value. In the code above, there is no error. If any of the code in those function throws exception, cb will also be called automatically with the exception as the first parameter.
 
-The second parameter passed to each of the functions `SeriesFunc1`, `SeriesFunc2` and `SeriesFunc3` is quite important. It is a dicionary which contains all the results from previous functions, so `SeriesFunc2` will receive result from `SeriesFunc1`, `SeriesFunc3` will receive results from `SeriesFunc1` and `SeriesFunc2`. The key of the dictionary are declared when creating the series, e.g. SeriesFunc.FromAction ("one", SeriesFunc1) means the result of SeriesFunc1 will have key "one". This is a powerful way to pass results between functions without creating high coupling between them.
+The second parameter passed to each of the functions `SeriesFunc1`, `SeriesFunc2` and `SeriesFunc3` is quite important. It is a dicionary which contains all the results from previous functions, so `SeriesFunc2` will receive result from `SeriesFunc1`, `SeriesFunc3` will receive results from `SeriesFunc1` and `SeriesFunc2`. The key of the dictionary are declared when creating the series, e.g. ChildFunc.FromAction ("one", SeriesFunc1) means the result of SeriesFunc1 will have key "one". This is a powerful way to pass results between functions without creating high coupling between them.
 
 After all the functions have been executed, there is a final function `UAsyncFinalFunc` which will receive all the results and execute some logic accordingly. If any of the functions above throws exceptions or calls callback with a `err` parameter, the error will be passed to the final function to deal with.
 
 The `UAsync.Async.Parallel` function is similar to the `Series` function, except that there will be no results from previous functions since they're executed concurrently.
 
-Finally, you can cancel a running sequence once it's started. This is not obvious with coroutine because even though you can call `MonoBehaviour.StopCoroutine`
+Finally, you can cancel a running sequence once it's started.
+
+**Implementation Note**
+The reason I have to wrap functions in `ChildFunc` is because I cannot distinguish between IEnumerator and Action if they have the same parameters.
 
 
 ## Changelog
 
+**0.0.3**
+
+* Add `Each`
+
 **0.0.2**
 
-* Add `Each` and `EachSeries`
+* Add `EachSeries`
 
 **0.0.1**
 
