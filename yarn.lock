@@ -2,9 +2,9 @@
 # yarn lockfile v1
 
 
-"leanpool@ssh://github.com/minhhh/unity-leanpool#v0.0.1":
-  version "0.0.1"
-  resolved "ssh://github.com/minhhh/unity-leanpool#f488d8edda5b96617f6c6c858b083b48d58e6d1b"
+"leanpool@ssh://github.com/minhhh/unity-leanpool#v0.0.2":
+  version "0.0.2"
+  resolved "ssh://github.com/minhhh/unity-leanpool#8379bceb1078279ce1bc842f8a2e037925a636ea"
   dependencies:
     minimist "ssh://github.com/substack/minimist.git#0.0.8"
     mkdirp "ssh://github.com/substack/node-mkdirp.git#0.5.1"

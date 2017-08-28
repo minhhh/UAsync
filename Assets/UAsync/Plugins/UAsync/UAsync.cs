@@ -195,6 +195,57 @@ namespace UAsync
 
     static class Async
     {
+        static private bool _initialized = false;
+        static private YieldInstruction _waitUpdate = new WaitForSeconds (1);
+        static private List<AsyncTask> _asyncTasks = new List<AsyncTask> ();
+        static private List<UInt64> _asyncTaskIds = new List<UInt64> ();
+        static private UInt64 _id = 0;
+
+        static private void _Initialize ()
+        {
+            if (_initialized) {
+                return;
+            }
+            _initialized = true;
+            TaskRunner.Instance.Run (Update ());
+        }
+
+        static IEnumerator Update ()
+        {
+            while (true) {
+                yield return _waitUpdate;
+                AsyncTask asyncTask;
+                for (int i = _asyncTasks.Count - 1; i > 0; i--) {
+                    asyncTask = _asyncTasks [i];
+                    if (asyncTask != null && asyncTask.IsFree) {
+                        _asyncTasks.RemoveAt (i);
+                        _asyncTaskIds.RemoveAt (i);
+                        LeanClassPool.Despawn (asyncTask);
+                    }
+                }
+            }
+        }
+
+        static UInt64 PushIAsyncTasks (AsyncTask asyncTask)
+        {
+            _id++;
+            _asyncTasks.Add (asyncTask);
+            _asyncTaskIds.Add (_id);
+            return _id;
+        }
+
+        static public bool CancelTask (UInt64 id)
+        {
+            var i = _asyncTaskIds.IndexOf (id);
+
+            if (i != -1) {
+                var asyncTask = _asyncTasks [i];
+                asyncTask.Cancel ();
+                return true;
+            }
+            return false;
+        }
+
         /// <summary>
         /// Run a series of functions in parallel
         /// The functions are wrapped in ChildFunc objects since C# does not
@@ -202,9 +253,16 @@ namespace UAsync
         /// The last parameter must be UAsyncFinalFunc
         /// </summary>
         /// <param name="args">Arguments.</param>
-        public static IAsyncTask Parallel (params object[] args)
+        public static UInt64 Parallel (params object[] args)
         {
-            return new AsyncParallel (args);
+            _Initialize ();
+            AsyncTask asyncTask = LeanClassPool.Spawn <AsyncParallel>();
+            if (asyncTask == null) {
+                asyncTask = new AsyncParallel ();
+                ((AsyncParallel)asyncTask).Execute (args);
+            }
+
+            return PushIAsyncTasks (asyncTask);
         }
 
         /// <summary>
@@ -214,9 +272,17 @@ namespace UAsync
         /// The last parameter must be UAsyncFinalFunc
         /// </summary>
         /// <param name="args">Arguments.</param>
-        public static IAsyncTask Series (params object[] args)
+        public static UInt64 Series (params object[] args)
         {
-            return new AsyncSeries (args);
+            _Initialize ();
+            AsyncTask asyncTask = LeanClassPool.Spawn <AsyncSeries>();
+
+            if (asyncTask == null) {
+                asyncTask = new AsyncSeries ();
+                ((AsyncSeries)asyncTask).Execute (args);
+            }
+                
+            return PushIAsyncTasks (asyncTask);
         }
 
         /// <summary>
@@ -226,9 +292,11 @@ namespace UAsync
         /// The last parameter must be UAsyncFinalFunc
         /// </summary>
         /// <param name="args">Arguments.</param>
-        public static IAsyncTask Each <T> (params object[] args)
+        public static UInt64 Each <T> (params object[] args)
         {
-            return new AsyncEach <T> (args);
+            _Initialize ();
+            AsyncTask asyncTask = new AsyncEach <T> (args);
+            return PushIAsyncTasks (asyncTask);
         }
 
         /// <summary>
@@ -238,28 +306,39 @@ namespace UAsync
         /// The last parameter must be UAsyncFinalFunc
         /// </summary>
         /// <param name="args">Arguments.</param>
-        public static IAsyncTask EachSeries <T> (params object[] args)
+        public static UInt64 EachSeries <T> (params object[] args)
         {
-            return new AsyncEachSeries <T> (args);
+            _Initialize ();
+            AsyncTask asyncTask = new AsyncEachSeries <T> (args);
+            return PushIAsyncTasks (asyncTask);
         }
     }
 
-    interface IAsyncTask
+    abstract class AsyncTask
     {
-        void Cancel ();
+        internal abstract void Cancel ();
+        internal bool IsDone {
+            get; set;
+        }
+        internal bool IsFree {
+            get; set;
+        }
     }
 
-    class AsyncParallel : IAsyncTask
+    class AsyncParallel : AsyncTask
     {
-        bool isDone;
         int completeNum;
         int total;
-        readonly UAsyncFinalFunc finalFunc;
-        readonly Dictionary<string, object> result;
-        readonly IList <TaskRoutine> taskRoutines;
-        readonly IList <ChildFunc> funcs;
+        UAsyncFinalFunc finalFunc;
+        readonly Dictionary<string, object> result = new Dictionary <string, object> ();
+        readonly IList <TaskRoutine> taskRoutines = new List <TaskRoutine> ();
+        readonly IList <ChildFunc> funcs = new List <ChildFunc> ();
 
-        internal AsyncParallel (object[] args)
+        internal AsyncParallel ()
+        {
+        }
+
+        internal void Execute (object[] args)
         {
             if (args.Length < 2) {
                 throw new ArgumentException ();
@@ -275,13 +354,11 @@ namespace UAsync
                 throw new ArgumentException ();
             }
 
-            isDone = false;
+            IsDone = false;
+            IsFree = false;
             completeNum = 0;
             total = args.Length - 1;
             finalFunc = args [args.Length - 1] as UAsyncFinalFunc;
-            result = new Dictionary <string, object> ();
-            taskRoutines = new List <TaskRoutine> ();
-            funcs = new List <ChildFunc> ();
 
             ChildFunc func;
 
@@ -292,6 +369,8 @@ namespace UAsync
 
                 if (result.ContainsKey (name)) {
                     Cleanup ();
+                    IsDone = true;
+                    IsFree = true;
                     throw new ArgumentException ("Same name is already used: " + name);
                 } else {
                     result [name] = null;
@@ -317,19 +396,19 @@ namespace UAsync
 
         void Callback (string name, object err = null, object res = null)
         {
-            if (isDone) {
+            if (IsDone) {
                 return;
             }
 
             if (err != null) {
-                isDone = true;
-
                 for (var i = 0; i < taskRoutines.Count; i++) {
                     taskRoutines [i].Cancel ();
                 }
 
                 Action<object, Dictionary<string, object>> action = finalFunc.action1;
                 Cleanup ();
+                IsDone = true;
+                IsFree = true;
                 action (err, null);
                 return;
             }
@@ -338,9 +417,9 @@ namespace UAsync
             completeNum++;
 
             if (completeNum == total) {
-                isDone = true;
                 Action<object, Dictionary<string, object>> action = finalFunc.action1;
                 Cleanup ();
+                IsDone = true;
                 action (err, null);
             }
         }
@@ -352,42 +431,49 @@ namespace UAsync
         /// <param name="res">Res.</param>
         void TaskRunnerCallback (object err = null, object res = null)
         {
-            if (isDone) {
+            if (IsFree) {
+                return;
+            }
+
+            if (IsDone) {
+                IsFree = true;
+                if (err != null) {
+                    var e = err as Exception;
+                    if (e != null) {
+                        throw e;
+                    } else {
+                        throw new Exception (err.ToString ());
+                    }
+                }
                 return;
             }
 
             if (err != null) {
-                isDone = true;
-
                 for (var i = 0; i < taskRoutines.Count; i++) {
                     taskRoutines [i].Cancel ();
                 }
 
                 Action<object, Dictionary<string, object>> action = finalFunc.action1;
                 Cleanup ();
+                IsDone = true;
+                IsFree = true;
                 action (err, null);
-            } else {
-                for (var i = taskRoutines.Count - 1; i >= 0; i--) {
-                    if (!taskRoutines [i].IsBusy) {
-                        taskRoutines.RemoveAt (i);
-                    }
-                }
             }
         }
 
-        public void Cancel ()
+        internal override void Cancel ()
         {
-            if (isDone) {
+            if (IsDone) {
                 return;
             }
-
-            isDone = true;
 
             for (int i = 0; i < taskRoutines.Count; i++) {
                 taskRoutines [i].Cancel ();
             }
 
             Cleanup ();
+            IsDone = true;
+            IsFree = true;
         }
 
         void Cleanup ()
@@ -405,17 +491,20 @@ namespace UAsync
         }
     }
 
-    class AsyncSeries : IAsyncTask
+    class AsyncSeries : AsyncTask
     {
-        bool isDone;
         int completeNum;
         int total;
-        readonly UAsyncFinalFunc finalFunc;
-        readonly Dictionary<string, object> result;
+        UAsyncFinalFunc finalFunc;
+        readonly Dictionary<string, object> result = new Dictionary <string, object> ();
         TaskRoutine taskRoutine;
-        readonly IList <ChildFunc> funcs;
+        readonly IList <ChildFunc> funcs = new List <ChildFunc> ();
 
-        internal AsyncSeries (object[] args)
+        internal AsyncSeries ()
+        {
+        }
+
+        internal void Execute (object[] args)
         {
             if (args.Length < 2) {
                 throw new ArgumentException ();
@@ -431,12 +520,13 @@ namespace UAsync
                 throw new ArgumentException ();
             }
 
-            isDone = false;
+            IsFree = false;
+            IsDone = false;
             completeNum = 0;
             total = args.Length - 1;
             finalFunc = args [args.Length - 1] as UAsyncFinalFunc;
-            result = new Dictionary <string, object> ();
-            funcs = new List <ChildFunc> ();
+            result.Clear ();
+            funcs.Clear ();
 
             ChildFunc func;
 
@@ -445,8 +535,10 @@ namespace UAsync
                 funcs.Add (func);
                 var name = func.name;
 
-                if (result.ContainsKey (name)) {TaskRoutine taskRoutine;
+                if (result.ContainsKey (name)) {
                     Cleanup ();
+                    IsDone = true;
+                    IsFree = true;
                     throw new ArgumentException ("Same name is already used: " + name);
                 } else {
                     result [name] = null;
@@ -477,15 +569,16 @@ namespace UAsync
 
         void Callback (string name, object err = null, object res = null)
         {
-            if (isDone) {
+            if (IsDone) {
                 return;
             }
 
             if (err != null) {
-                isDone = true;
                 taskRoutine.Cancel ();
                 Action<object, Dictionary<string, object>> action = finalFunc.action1;
                 Cleanup ();
+                IsDone = true;
+                IsFree = true;
                 action (err, null);
                 return;
             }
@@ -494,9 +587,9 @@ namespace UAsync
             completeNum++;
 
             if (completeNum == total) {
-                isDone = true;
                 Action<object, Dictionary<string, object>> action = finalFunc.action1;
                 Cleanup ();
+                IsDone = true;
                 action (err, null);
             } else {
                 RunOneFunc (funcs [completeNum] as ChildFunc);
@@ -510,28 +603,41 @@ namespace UAsync
         /// <param name="res">Res.</param>
         void TaskRunnerCallback (object err = null, object res = null)
         {
-            if (isDone) {
+            if (IsFree) {
+                return;
+            }
+
+            if (IsDone) {
+                IsFree = true;
+                if (err != null) {
+                    var e = err as Exception;
+                    if (e != null) {
+                        throw e;
+                    } else {
+                        throw new Exception (err.ToString ());
+                    }
+                }
                 return;
             }
 
             if (err != null) {
-                isDone = true;
                 Action<object, Dictionary<string, object>> action = finalFunc.action1;
                 Cleanup ();
+                IsDone = true;
+                IsFree = true;
                 action (err, null);
             }
         }
 
-        public void Cancel ()
+        internal override void Cancel ()
         {
-            if (isDone) {
+            if (IsDone) {
                 return;
             }
-
-            isDone = true;
             taskRoutine.Cancel ();
-
             Cleanup ();
+            IsDone = true;
+            IsFree = true;
         }
 
         void Cleanup ()
@@ -549,7 +655,7 @@ namespace UAsync
         }
     }
 
-    class AsyncEach<T> : IAsyncTask
+    class AsyncEach<T> : AsyncTask
     {
         bool isDone;
         int completeNum;
@@ -670,7 +776,7 @@ namespace UAsync
             }
         }
 
-        public void Cancel ()
+        internal override void Cancel ()
         {
             if (isDone) {
                 return;
@@ -696,7 +802,7 @@ namespace UAsync
         }
     }
 
-    class AsyncEachSeries<T> : IAsyncTask
+    class AsyncEachSeries<T> : AsyncTask
     {
         bool isDone;
         int completeNum;
@@ -806,7 +912,7 @@ namespace UAsync
             }
         }
 
-        public void Cancel ()
+        internal override void Cancel ()
         {
             if (isDone) {
                 return;

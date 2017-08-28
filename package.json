@@ -15,7 +15,7 @@
     "minimist": "ssh://github.com/substack/minimist.git#0.0.8",
     "mkdirp": "ssh://github.com/substack/node-mkdirp.git#0.5.1",
     "ncp": "ssh://github.com/AvianFlu/ncp.git#v2.0.0",
-    "leanpool": "ssh://github.com/minhhh/unity-leanpool#v0.0.1"
+    "leanpool": "ssh://github.com/minhhh/unity-leanpool#v0.0.2"
   }
 }
 
