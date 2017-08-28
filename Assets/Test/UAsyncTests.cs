@@ -14,7 +14,7 @@ public class UAsyncTests : MonoBehaviour
         time += Time.deltaTime;
         if (time > 1) {
             time = 0;
-//            TestParallelGC ();
+//            TestEachSeriesGC ();
         }
     }
 
@@ -24,17 +24,44 @@ public class UAsyncTests : MonoBehaviour
         TestSeries ();
 //        TestEach ();
 //        TestEachSeries ();
-//        TestSeriesGC ();
-//        TestParallelGC ();
+    }
+
+    void TestEachSeriesGC ()
+    {
+        var a = new int [] { 1, 2, 3 };
+        var series = 
+            UAsync.Async.EachSeries<int> (
+                a,
+                                ChildFunc<int>.Create (PrintInt),
+//                ChildFunc<int>.Create (PrintIntCo),
+                UAsyncFinalFunc.Create ((object err) => {
+//                    Debug.Log ("Finish " + err);
+                })
+            );
+    }
+
+    void TestEachGC ()
+    {
+        var a = new int [] { 1, 2, 3 };
+
+        var series = 
+            UAsync.Async.Each<int> (
+                a,
+                                ChildFunc<int>.Create (PrintInt),
+//                ChildFunc<int>.Create (PrintIntCo),
+                UAsyncFinalFunc.Create ((object err) => {
+//                    Debug.Log ("Finish " + err);
+                })
+            );
     }
 
     void TestParallelGC ()
     {
         var parallel = 
             UAsync.Async.Parallel (
-//                ChildFunc.FromAction ("one", Func1),
-                ChildFunc.FromEnumerator ("two", Func2),
-//                ChildFunc.FromAction ("three", Func3),
+                ChildFunc.Create ("one", Func1),
+//                ChildFunc.Create ("two", Func2),
+                ChildFunc.Create ("three", Func3),
                 UAsyncFinalFunc.Create ((object err, Dictionary<string, object> res) => {
 //                    Debug.Log ("Finish " + err);
                     if (err == null) {
@@ -49,9 +76,9 @@ public class UAsyncTests : MonoBehaviour
     {
         var series = 
             UAsync.Async.Series (
-                ChildFunc.FromAction ("one", SeriesFunc1),
-                //                ChildFunc.FromEnumerator ("two", SeriesFunc2),
-                //                ChildFunc.FromAction ("three", SeriesFunc3),
+//                ChildFunc.Create ("one", SeriesFunc1),
+//                ChildFunc.Create ("two", SeriesFunc2),
+                ChildFunc.Create ("three", SeriesFunc3),
                 UAsyncFinalFunc.Create ((object err, Dictionary<string, object> res) => {
                     // Debug.Log ("Finish " + err);
                     if (err == null) {
@@ -67,11 +94,10 @@ public class UAsyncTests : MonoBehaviour
         var series = 
             UAsync.Async.Each<int> (
                 a,
-                //                ParallelFunc<int>.Create (PrintInt),
-                ChildFunc<int>.FromEnumerator (PrintIntCo),
+                ChildFunc<int>.Create (PrintInt),
+//                ChildFunc<int>.Create (PrintIntCo),
                 UAsyncFinalFunc.Create ((object err) => {
 //                    Debug.Log ("Finish " + err);
-                    TestEach ();
                 })
             );
     }
@@ -82,8 +108,8 @@ public class UAsyncTests : MonoBehaviour
         var series = 
             UAsync.Async.EachSeries<int> (
                 a,
-//                ParallelFunc<int>.Create (PrintInt),
-                ChildFunc<int>.FromEnumerator (PrintIntCo),
+                ChildFunc<int>.Create (PrintInt),
+//                ChildFunc<int>.Create (PrintIntCo),
                 UAsyncFinalFunc.Create ((object err) => {
                     Debug.Log ("Finish " + err);
                 })
@@ -92,7 +118,8 @@ public class UAsyncTests : MonoBehaviour
 
     IEnumerator PrintIntCo (int i, CallbackDelegate cb)
     {
-        yield return new WaitForSeconds (4 - i);
+//        yield return new WaitForSeconds (4 - i);
+        yield return null;
 //        Debug.Log (i);
         cb ();
     }
@@ -107,15 +134,15 @@ public class UAsyncTests : MonoBehaviour
     {
         var series = 
             UAsync.Async.Series (
-//                ChildFunc.FromAction ("one", SeriesFunc1),
-                ChildFunc.FromEnumerator ("two", SeriesFunc2),
-//                ChildFunc.FromAction ("three", SeriesFunc3),
+                ChildFunc.Create ("one", SeriesFunc1),
+                ChildFunc.Create ("two", SeriesFunc2),
+                ChildFunc.Create ("three", SeriesFunc3),
                 UAsyncFinalFunc.Create ((object err, Dictionary<string, object> res) => {
                     Debug.Log ("Finish " + err);
                     if (err == null) {
 //                        Debug.Log ("res " + res ["one"] + " " + res ["two"] + " " + res ["three"]);
                     }
-//                    throw new Exception ();
+                    throw new Exception ();
                  
                 })
             );
@@ -124,7 +151,7 @@ public class UAsyncTests : MonoBehaviour
 
     void SeriesFunc1 (CallbackDelegate cb, Dictionary<string, object> res)
     {
-//        Debug.Log ("SeriesFunc1");
+        Debug.Log ("SeriesFunc1");
 
         //        throw new UnityException ("Exception from Func1");
         cb (null, 100);
@@ -151,9 +178,9 @@ public class UAsyncTests : MonoBehaviour
     {
         var parallel = 
             UAsync.Async.Parallel (
-                ChildFunc.FromAction ("one", Func1),
-                ChildFunc.FromEnumerator ("two", Func2),
-                ChildFunc.FromAction ("three", Func3),
+                ChildFunc.Create ("one", Func1),
+                ChildFunc.Create ("two", Func2),
+                ChildFunc.Create ("three", Func3),
                 UAsyncFinalFunc.Create ((object err, Dictionary<string, object> res) => {
                     Debug.Log ("Finish " + err);
                     if (err == null) {
